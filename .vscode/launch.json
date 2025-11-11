@@ -1,0 +1,36 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: Current File",
+      "type": "python",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Deploy Pipeline",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/mlops/pipelines/iris_pipeline.py",
+      "console": "integratedTerminal",
+      "env": {
+        "AWS_REGION": "eu-north-1",
+        "TRAINING_IMAGE_URI": "305637213530.dkr.ecr.eu-north-1.amazonaws.com/iris-classifier-training:latest",
+        "EVALUATION_IMAGE_URI": "305637213530.dkr.ecr.eu-north-1.amazonaws.com/iris-classifier-evaluation:latest"
+      }
+    },
+    {
+      "name": "Deploy Pipeline (with execution)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/mlops/pipelines/iris_pipeline.py",
+      "console": "integratedTerminal",
+      "env": {
+        "CI_RUN": "1",
+        "AWS_REGION": "eu-north-1"
+      }
+    }
+  ]
+}

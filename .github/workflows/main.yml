@@ -1,0 +1,112 @@
+name: MLOps Pipeline - Docker Edition
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "projects/iris_classifier/src/**"
+      - "docker/**"
+      - "mlops/pipelines/**"
+      - ".github/workflows/**"
+  workflow_dispatch: # Allow manual trigger
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECR_TRAINING_REPO: iris-classifier-training
+  ECR_EVALUATION_REPO: iris-classifier-evaluation
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Set image tags
+        id: image-tags
+        run: |
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "training_image=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_TRAINING_REPO }}:$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "evaluation_image=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_EVALUATION_REPO }}:$SHORT_SHA" >> $GITHUB_OUTPUT
+
+      - name: Build and push training image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ steps.image-tags.outputs.short_sha }}
+        run: |
+          echo "Building training image..."
+          docker build \
+            --platform linux/amd64 \
+            -f docker/training/Dockerfile \
+            -t $ECR_REGISTRY/$ECR_TRAINING_REPO:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_TRAINING_REPO:latest \
+            .
+
+          echo "Pushing training image..."
+          docker push $ECR_REGISTRY/$ECR_TRAINING_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_TRAINING_REPO:latest
+
+          echo "✓ Training image pushed"
+
+      - name: Build and push evaluation image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ steps.image-tags.outputs.short_sha }}
+        run: |
+          echo "Building evaluation image..."
+          docker build \
+            -f docker/evaluation/Dockerfile \
+            -t $ECR_REGISTRY/$ECR_EVALUATION_REPO:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_EVALUATION_REPO:latest \
+            .
+
+          echo "Pushing evaluation image..."
+          docker push $ECR_REGISTRY/$ECR_EVALUATION_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_EVALUATION_REPO:latest
+
+          echo "✓ Evaluation image pushed"
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+
+      - name: Install dependencies
+        run: |
+          pip install sagemaker boto3
+
+      - name: Deploy SageMaker Pipeline
+        env:
+          TRAINING_IMAGE_URI: ${{ steps.image-tags.outputs.training_image }}
+          EVALUATION_IMAGE_URI: ${{ steps.image-tags.outputs.evaluation_image }}
+          SAGEMAKER_ROLE: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/service-role/AmazonSageMaker-ExecutionRole-20251106T100477
+          CI_RUN: "1"
+        run: |
+          echo "Deploying pipeline with images:"
+          echo "  Training: $TRAINING_IMAGE_URI"
+          echo "  Evaluation: $EVALUATION_IMAGE_URI"
+
+          python mlops/pipelines/iris_pipeline.py
+
+      - name: Output summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Docker images built and pushed:" >> $GITHUB_STEP_SUMMARY
+          echo "- Training: \`${{ steps.image-tags.outputs.training_image }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Evaluation: \`${{ steps.image-tags.outputs.evaluation_image }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ SageMaker Pipeline updated and started" >> $GITHUB_STEP_SUMMARY
