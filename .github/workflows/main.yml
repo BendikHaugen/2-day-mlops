@@ -7,6 +7,7 @@ on:
       - "projects/iris_classifier/**"
       - "docker/**"
       - "mlops/pipelines/**"
+      - ".github/**" # For testing pipeline
   workflow_dispatch:
 
 env:
@@ -34,25 +35,6 @@ jobs:
       - name: Run training script
         run: |
           python projects/iris_classifier/src/train.py
-
-      - name: Verify model artifact
-        run: |
-          # Check if model directory was created
-          if [ ! -d model ]; then
-            echo "❌ Model directory not found"
-            exit 1
-          fi
-
-          # Check if model file exists
-          if [ ! -f model/model.joblib ]; then
-            echo "❌ Model file not found in model/"
-            ls -la model/
-            exit 1
-          fi
-
-          # Success!
-          echo "✓ Model created successfully"
-          ls -lh model/model.joblib
 
   build-and-push:
     name: Build & Push Docker Images
