@@ -22,6 +22,7 @@ def get_pipeline(
     role,
     training_image_uri,
     evaluation_image_uri,
+    inference_image_uri,
     model_group_name="iris-classifier-staging",
     pipeline_name="IrisPipeline",
 ):
@@ -92,7 +93,7 @@ def get_pipeline(
     
     # --- Register Model Step ---
     model = Model(
-        image_uri=training_image_uri,
+        image_uri=inference_image_uri,
         model_data=training_step.properties.ModelArtifacts.S3ModelArtifacts,
         sagemaker_session=sagemaker_session,
         role=role,
@@ -146,7 +147,8 @@ def main():
     # Docker image URIs
     training_image = f"{account_id}.dkr.ecr.{region}.amazonaws.com/iris-classifier-training:latest"
     evaluation_image = f"{account_id}.dkr.ecr.{region}.amazonaws.com/iris-classifier-evaluation:latest"
-    
+    inference_image = f"{account_id}.dkr.ecr.{region}.amazonaws.com/iris-classifier-inference:latest"
+
     log.info("=" * 60)
     log.info("Creating SageMaker Pipeline")
     log.info("=" * 60)
@@ -154,14 +156,16 @@ def main():
     log.info(f"Account: {account_id}")
     log.info(f"Training image: {training_image}")
     log.info(f"Evaluation image: {evaluation_image}")
+    log.info(f"Inference image: {inference_image}")
     log.info("=" * 60)
-    
+
     # Create pipeline
     pipeline = get_pipeline(
         region=region,
         role=role,
         training_image_uri=training_image,
         evaluation_image_uri=evaluation_image,
+        inference_image_uri=inference_image,
     )
     
     # Deploy pipeline
