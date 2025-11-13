@@ -16,7 +16,7 @@ env:
 
 jobs:
   test:
-    name: Test Locally
+    name: Test Training
     runs-on: ubuntu-latest
 
     steps:
@@ -35,9 +35,24 @@ jobs:
         run: |
           python projects/iris_classifier/src/train.py
 
-      - name: Verify model created
+      - name: Verify model artifact
         run: |
-          test -f model/model.joblib && echo "✓ Model created" || exit 1
+          # Check if model directory was created
+          if [ ! -d model ]; then
+            echo "❌ Model directory not found"
+            exit 1
+          fi
+
+          # Check if model file exists
+          if [ ! -f model/model.joblib ]; then
+            echo "❌ Model file not found in model/"
+            ls -la model/
+            exit 1
+          fi
+
+          # Success!
+          echo "✓ Model created successfully"
+          ls -lh model/model.joblib
 
   build-and-push:
     name: Build & Push Docker Images
