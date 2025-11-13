@@ -36,4 +36,3 @@ if __name__ == "__main__":
     print(f"✓ Model saved to: {model_path}")
     print("=" * 60)
 
-# CI/CD test
