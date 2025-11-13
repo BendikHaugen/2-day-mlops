@@ -1,6 +1,7 @@
 import logging
 import os
 
+import boto3
 import sagemaker
 from sagemaker.estimator import Estimator
 from sagemaker.model import Model
@@ -24,64 +25,52 @@ def get_pipeline(
     model_group_name="iris-classifier-staging",
     pipeline_name="IrisPipeline",
 ):
-    """
-    Creates a SageMaker Pipeline using custom Docker images.
-
-    Args:
-        region: AWS region
-        role: SageMaker execution role ARN
-        training_image_uri: ECR URI for training image
-        evaluation_image_uri: ECR URI for evaluation image
-        model_group_name: Model Registry group name
-        pipeline_name: Name of the pipeline
-
-    Returns:
-        Pipeline object
-    """
+    """Create the Iris classifier pipeline."""
+    
     sagemaker_session = sagemaker.Session()
-
+    bucket = sagemaker_session.default_bucket()
+    
     # Parameters
     model_group_param = ParameterString(
         name="ModelGroupName",
         default_value=model_group_name
     )
-
+    
     cache_config = CacheConfig(enable_caching=True, expire_after="30d")
-    default_instance_type = "ml.m5.large"
-
+    
     # --- Training Step ---
-    estimator = Estimator(
+    training_estimator = Estimator(
         image_uri=training_image_uri,
         role=role,
         instance_count=1,
-        instance_type=default_instance_type,
+        instance_type="ml.m5.large",
         sagemaker_session=sagemaker_session,
         environment={
             "TRAINING_IMAGE": training_image_uri,
         }
     )
-
+    
     training_step = TrainingStep(
         name="TrainModel",
-        estimator=estimator,
+        estimator=training_estimator,
         cache_config=cache_config,
     )
-
+    
     # --- Evaluation Step ---
     evaluation_processor = Processor(
         image_uri=evaluation_image_uri,
         role=role,
         instance_count=1,
-        instance_type=default_instance_type,
+        instance_type="ml.t3.medium",
         sagemaker_session=sagemaker_session,
     )
-
+    
     evaluation_report = PropertyFile(
         name="EvaluationReport",
         output_name="evaluation",
         path="evaluation.json"
     )
-
+    
     evaluation_step = ProcessingStep(
         name="EvaluateModel",
         processor=evaluation_processor,
@@ -100,7 +89,7 @@ def get_pipeline(
         property_files=[evaluation_report],
         cache_config=cache_config,
     )
-
+    
     # --- Register Model Step ---
     model = Model(
         image_uri=training_image_uri,
@@ -108,7 +97,7 @@ def get_pipeline(
         sagemaker_session=sagemaker_session,
         role=role,
     )
-
+    
     model_metrics = ModelMetrics(
         model_statistics=MetricsSource(
             s3_uri=evaluation_step.properties.ProcessingOutputConfig.Outputs[
@@ -117,86 +106,83 @@ def get_pipeline(
             content_type="application/json"
         )
     )
-
+    
     register_step = RegisterModel(
         name="RegisterModel",
         model=model,
         content_types=["text/csv"],
         response_types=["text/csv"],
-        inference_instances=[default_instance_type],
-        transform_instances=[default_instance_type],
+        inference_instances=["ml.t2.medium"],
+        transform_instances=["ml.c6i.large"],
         model_package_group_name=model_group_param,
         approval_status="PendingManualApproval",
         model_metrics=model_metrics,
     )
-
-    # --- Create Pipeline ---
+    
+    # Create pipeline
     pipeline = Pipeline(
         name=pipeline_name,
         parameters=[model_group_param],
         steps=[training_step, evaluation_step, register_step],
         sagemaker_session=sagemaker_session,
     )
-
+    
     return pipeline
 
 
 def main():
-    """Main function to create/update and optionally start the pipeline."""
-
+    """Deploy the pipeline."""
+    
     # Configuration
     region = os.environ.get("AWS_REGION", "eu-north-1")
-    role = os.environ.get(
-        "SAGEMAKER_ROLE",
-        "arn:aws:iam::305637213530:role/service-role/AmazonSageMaker-ExecutionRole-20251106T100477"
-    )
-
-    # Docker image URIs (passed from CI/CD or defaults)
-    training_image_uri = os.environ.get(
-        "TRAINING_IMAGE_URI",
-        "305637213530.dkr.ecr.eu-north-1.amazonaws.com/iris-classifier-training:latest"
-    )
-    evaluation_image_uri = os.environ.get(
-        "EVALUATION_IMAGE_URI",
-        "305637213530.dkr.ecr.eu-north-1.amazonaws.com/iris-classifier-evaluation:latest"
-    )
-
-    log.info(f"Creating pipeline with images:")
-    log.info(f"  Training: {training_image_uri}")
-    log.info(f"  Evaluation: {evaluation_image_uri}")
-
+    
+    # Get account ID
+    sts_client = boto3.client('sts', region_name=region)
+    account_id = sts_client.get_caller_identity()['Account']
+    
+    # IAM Role
+    role = f"arn:aws:iam::{account_id}:role/service-role/AmazonSageMaker-ExecutionRole-20251106T100477"
+    
+    # Docker image URIs
+    training_image = f"{account_id}.dkr.ecr.{region}.amazonaws.com/iris-classifier-training:latest"
+    evaluation_image = f"{account_id}.dkr.ecr.{region}.amazonaws.com/iris-classifier-evaluation:latest"
+    
+    log.info("=" * 60)
+    log.info("Creating SageMaker Pipeline")
+    log.info("=" * 60)
+    log.info(f"Region: {region}")
+    log.info(f"Account: {account_id}")
+    log.info(f"Training image: {training_image}")
+    log.info(f"Evaluation image: {evaluation_image}")
+    log.info("=" * 60)
+    
     # Create pipeline
     pipeline = get_pipeline(
         region=region,
         role=role,
-        training_image_uri=training_image_uri,
-        evaluation_image_uri=evaluation_image_uri,
+        training_image_uri=training_image,
+        evaluation_image_uri=evaluation_image,
     )
-
-    # Upsert pipeline
-    log.info("Upserting pipeline definition...")
+    
+    # Deploy pipeline
+    log.info("\nUpserting pipeline...")
     pipeline.upsert(role_arn=role)
-    log.info("✓ Pipeline upsert complete")
-
-    # Optionally start execution (for CI/CD)
-    if os.environ.get("CI_RUN"):
-        log.info("CI_RUN detected. Starting pipeline execution...")
+    log.info("✓ Pipeline deployed successfully!")
+    
+    # Optionally start execution
+    if os.environ.get("START_EXECUTION"):
+        log.info("\nStarting pipeline execution...")
         execution = pipeline.start()
-        log.info(f"✓ Started execution: {execution.arn}")
-
-        # Wait for completion (optional)
-        if os.environ.get("WAIT_FOR_COMPLETION"):
-            log.info("Waiting for pipeline to complete...")
-            execution.wait(delay=30, max_attempts=60)
-            status = execution.describe()['PipelineExecutionStatus']
-
-            if status != 'Succeeded':
-                log.error(f"Pipeline failed with status: {status}")
-                raise Exception("Pipeline execution failed")
-
-            log.info("✓ Pipeline execution succeeded!")
+        log.info(f"✓ Execution started: {execution.arn}")
+        log.info("\nView in console:")
+        log.info(f"https://console.aws.amazon.com/sagemaker/home?region={region}#/pipelines/IrisPipeline/executions")
     else:
-        log.info("Pipeline ready. Start from SageMaker Studio UI or set CI_RUN=1")
+        log.info("\n" + "=" * 60)
+        log.info("Pipeline deployed but not started")
+        log.info("To start execution:")
+        log.info("  Option 1: START_EXECUTION=1 python mlops/pipelines/iris_pipeline.py")
+        log.info("  Option 2: AWS Console → SageMaker → Pipelines → IrisPipeline → Create execution")
+        log.info("=" * 60)
 
 
 if __name__ == "__main__":

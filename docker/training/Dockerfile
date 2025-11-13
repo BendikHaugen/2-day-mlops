@@ -7,6 +7,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY projects/iris_classifier/src/train.py .
 
-ENV SAGEMAKER_PROGRAM=train.py
-
 ENTRYPOINT ["python", "train.py"]

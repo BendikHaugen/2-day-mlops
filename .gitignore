@@ -3,4 +3,4 @@ model/
 eval/
 docker-test/
 *.log
-.env  
+.env
