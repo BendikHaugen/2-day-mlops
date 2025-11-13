@@ -1,27 +1,51 @@
-name: MLOps Pipeline - Docker Edition
+name: MLOps Pipeline
 
 on:
   push:
     branches: [main]
     paths:
-      - "projects/iris_classifier/src/**"
+      - "projects/iris_classifier/**"
       - "docker/**"
       - "mlops/pipelines/**"
-      - ".github/workflows/**"
-  workflow_dispatch: # Allow manual trigger
+  workflow_dispatch:
 
 env:
-  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_REGION: eu-north-1
   ECR_TRAINING_REPO: iris-classifier-training
   ECR_EVALUATION_REPO: iris-classifier-evaluation
 
 jobs:
-  build-and-deploy:
+  test:
+    name: Test Locally
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+
+      - name: Install dependencies
+        run: |
+          pip install scikit-learn==1.3.2 joblib==1.3.2 numpy==1.24.3
+
+      - name: Run training script
+        run: |
+          python projects/iris_classifier/src/train.py
+
+      - name: Verify model created
+        run: |
+          test -f model/model.joblib && echo "✓ Model created" || exit 1
+
+  build-and-push:
+    name: Build & Push Docker Images
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
@@ -34,79 +58,67 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Set image tags
-        id: image-tags
-        run: |
-          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
-          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
-          echo "training_image=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_TRAINING_REPO }}:$SHORT_SHA" >> $GITHUB_OUTPUT
-          echo "evaluation_image=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_EVALUATION_REPO }}:$SHORT_SHA" >> $GITHUB_OUTPUT
-
-      - name: Build and push training image
+      - name: Build, tag, and push training image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ steps.image-tags.outputs.short_sha }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          echo "Building training image..."
-          docker build \
-            --platform linux/amd64 \
+          docker build --platform linux/amd64 \
             -f docker/training/Dockerfile \
             -t $ECR_REGISTRY/$ECR_TRAINING_REPO:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_TRAINING_REPO:latest \
             .
 
-          echo "Pushing training image..."
           docker push $ECR_REGISTRY/$ECR_TRAINING_REPO:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_TRAINING_REPO:latest
 
-          echo "✓ Training image pushed"
-
-      - name: Build and push evaluation image
+      - name: Build, tag, and push evaluation image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ steps.image-tags.outputs.short_sha }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          echo "Building evaluation image..."
-          docker build \
+          docker build --platform linux/amd64 \
             -f docker/evaluation/Dockerfile \
             -t $ECR_REGISTRY/$ECR_EVALUATION_REPO:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_EVALUATION_REPO:latest \
             .
 
-          echo "Pushing evaluation image..."
           docker push $ECR_REGISTRY/$ECR_EVALUATION_REPO:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_EVALUATION_REPO:latest
 
-          echo "✓ Evaluation image pushed"
+  deploy-pipeline:
+    name: Deploy SageMaker Pipeline
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.9"
 
-      - name: Install dependencies
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Install SageMaker SDK
         run: |
           pip install sagemaker boto3
 
-      - name: Deploy SageMaker Pipeline
+      - name: Deploy and run pipeline
         env:
-          TRAINING_IMAGE_URI: ${{ steps.image-tags.outputs.training_image }}
-          EVALUATION_IMAGE_URI: ${{ steps.image-tags.outputs.evaluation_image }}
-          SAGEMAKER_ROLE: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/service-role/AmazonSageMaker-ExecutionRole-20251106T100477
-          CI_RUN: "1"
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          START_EXECUTION: "1"
         run: |
-          echo "Deploying pipeline with images:"
-          echo "  Training: $TRAINING_IMAGE_URI"
-          echo "  Evaluation: $EVALUATION_IMAGE_URI"
-
           python mlops/pipelines/iris_pipeline.py
 
-      - name: Output summary
+      - name: Output pipeline URL
         run: |
-          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "🎉 Pipeline deployed and started!" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Docker images built and pushed:" >> $GITHUB_STEP_SUMMARY
-          echo "- Training: \`${{ steps.image-tags.outputs.training_image }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Evaluation: \`${{ steps.image-tags.outputs.evaluation_image }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ SageMaker Pipeline updated and started" >> $GITHUB_STEP_SUMMARY
+          echo "View execution: https://console.aws.amazon.com/sagemaker/home?region=${{ secrets.AWS_REGION }}#/pipelines/IrisPipeline/executions" >> $GITHUB_STEP_SUMMARY
