@@ -14,6 +14,7 @@ env:
   AWS_REGION: eu-north-1
   ECR_TRAINING_REPO: iris-classifier-training
   ECR_EVALUATION_REPO: iris-classifier-evaluation
+  ECR_INFERENCE_REPO: iris-classifier-inference
 
 jobs:
   test:
@@ -82,6 +83,20 @@ jobs:
 
           docker push $ECR_REGISTRY/$ECR_EVALUATION_REPO:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_EVALUATION_REPO:latest
+
+      - name: Build, tag, and push inference image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build --platform linux/amd64 \
+            -f docker/inference/Dockerfile \
+            -t $ECR_REGISTRY/$ECR_INFERENCE_REPO:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_INFERENCE_REPO:latest \
+            .
+
+          docker push $ECR_REGISTRY/$ECR_INFERENCE_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_INFERENCE_REPO:latest
 
   deploy-pipeline:
     name: Deploy SageMaker Pipeline

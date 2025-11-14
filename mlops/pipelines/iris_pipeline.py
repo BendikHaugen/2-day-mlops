@@ -145,6 +145,9 @@ def main():
     role = f"arn:aws:iam::{account_id}:role/service-role/AmazonSageMaker-ExecutionRole-20251106T100477"
     
     # Docker image URIs
+    # Note: These images are built by .github/workflows/main.yml on ubuntu-latest
+    # This ensures Docker Manifest V2 format (not OCI) which is required by CreateModel API
+    # See: OCI_MANIFEST_ISSUE.md for details on why images must be built on Linux
     training_image = f"{account_id}.dkr.ecr.{region}.amazonaws.com/iris-classifier-training:latest"
     evaluation_image = f"{account_id}.dkr.ecr.{region}.amazonaws.com/iris-classifier-evaluation:latest"
     inference_image = f"{account_id}.dkr.ecr.{region}.amazonaws.com/iris-classifier-inference:latest"
