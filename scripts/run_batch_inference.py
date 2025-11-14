@@ -85,9 +85,13 @@ def main():
     input_key = f'batch-input/test-{timestamp}.csv'
     input_path = f's3://{bucket}/{input_key}'
 
+    # SageMaker Batch Transform expects a directory prefix, not a full file path
+    # So we use the directory containing the file as the input
+    input_path_prefix = f's3://{bucket}/batch-input/'
+
     s3.upload_file(test_file, bucket, input_key)
     print(f"✓ Test data uploaded to {input_path}")
-    
+
     # Create model package
     print("\n3️⃣  Creating transformer...")
     model_package = ModelPackage(
@@ -95,27 +99,27 @@ def main():
         model_package_arn=model_arn,
         sagemaker_session=session
     )
-    
+
     output_path = f's3://{bucket}/batch-output/'
-    
+
     transformer = model_package.transformer(
         instance_count=1,
         instance_type='ml.c6i.large',
         output_path=output_path,
         accept='text/csv',
     )
-    
+
     print("✓ Transformer created")
-    
+
     # Run batch transform
     print("\n4️⃣  Starting batch transform job...")
     print("   ⏳ This takes 5-7 minutes (starting instance, loading model, running predictions)...")
 
-    print(f"   Debug: Input path = {input_path}")
+    print(f"   Debug: Input prefix = {input_path_prefix}")
     print(f"   Debug: Output path = {output_path}")
 
     transformer.transform(
-        data=input_path,
+        data=input_path_prefix,
         content_type='text/csv',
         split_type='Line',
         wait=False,  # Don't block, we'll poll

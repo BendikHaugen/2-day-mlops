@@ -7,8 +7,25 @@ import numpy as np
 
 
 def model_fn(model_dir):
+    """Load the model from the model directory.
+
+    Args:
+        model_dir: Path to the directory containing the model artifacts.
+                  SageMaker passes this as /opt/ml/model
+
+    Returns:
+        Loaded sklearn model
+    """
+    print(f"Loading model from: {model_dir}")
     model_path = os.path.join(model_dir, "model.joblib")
-    return joblib.load(model_path)
+    print(f"Looking for model at: {model_path}")
+
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Model file not found at {model_path}")
+
+    model = joblib.load(model_path)
+    print(f"Model loaded successfully: {type(model)}")
+    return model
 
 
 def input_fn(request_body, request_content_type):
